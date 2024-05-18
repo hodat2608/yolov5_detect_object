@@ -892,7 +892,7 @@ class Detections:
         self.t = tuple(x.t / self.n * 1e3 for x in times)  # timestamps (ms)
         self.s = tuple(shape)  # inference BCHW shape
 
-    def _run(self, pprint=False, show=False, save=False, crop=False, render=False, labels=True, save_dir=Path("")):
+    def _run(self, pprint=False, show=False, save=False, crop=False, render=False, labels=True, save_dir=Path(""),area_remove=None):
         """Executes model predictions, displaying and/or saving outputs with optional crops and labels."""
         s, crops = "", []
         for i, (im, pred) in enumerate(zip(self.ims, self.pred)):
@@ -904,8 +904,23 @@ class Detections:
                 s = s.rstrip(", ")
                 if show or save or render or crop:
                     annotator = Annotator(im, example=str(self.names))
+                    if area_remove == None or area_remove == []:
+                       pass
+                    else:
+                        pred = pred.tolist()
+                        need_remove = []
+                        for ipred in range(len(pred)):
+                            if ipred in area_remove:
+                                item = pred[ipred]
+                                need_remove.append(item)
+                        for j in need_remove:
+                            pred.remove(j)
+                        pred = torch.Tensor(pred)
                     for *box, conf, cls in reversed(pred):  # xyxy, confidence, class
-                        label = f"{self.names[int(cls)]} {conf:.2f}"
+                        # label = f"{self.names[int(cls)]} {conf:.2f}"
+                        w = int(box[2] - box[0])
+                        h = int(box[3] - box[1])
+                        label = f'{self.names[int(cls)]} {conf:.2f} {w} {h}'
                         if crop:
                             file = save_dir / "crops" / self.names[int(cls)] / self.files[i] if save else None
                             crops.append(
@@ -973,9 +988,9 @@ class Detections:
         save_dir = increment_path(save_dir, exist_ok, mkdir=True) if save else None
         return self._run(crop=True, save=save, save_dir=save_dir)  # crop results
 
-    def render(self, labels=True):
+    def render(self, area_remove=True):
         """Renders detection results with optional labels on images; args: labels (bool) indicating label inclusion."""
-        self._run(render=True, labels=labels)  # render results
+        self._run(render=True, area_remove=area_remove)  # render results
         return self.ims
 
     def pandas(self):

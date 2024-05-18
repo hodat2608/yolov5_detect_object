@@ -98,7 +98,7 @@ LOCAL_RANK = int(os.getenv("LOCAL_RANK", -1))  # https://pytorch.org/docs/stable
 RANK = int(os.getenv("RANK", -1))
 WORLD_SIZE = int(os.getenv("WORLD_SIZE", 1))
 GIT_INFO = check_git_info()
-
+os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 
 def train(hyp, opt, device, callbacks):
     """
