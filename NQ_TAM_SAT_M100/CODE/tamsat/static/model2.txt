@@ -1,0 +1,1 @@
+model2=C:/Users/Administrator/Documents/Model/TAM_SAT_M100_2024-04-24.pt

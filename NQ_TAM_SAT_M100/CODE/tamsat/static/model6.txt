@@ -1,0 +1,1 @@
+model6=C:/Users/Administrator/Desktop/FILE_TRAIN/a86_c1__2023-07-10.pt

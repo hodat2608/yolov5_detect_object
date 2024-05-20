@@ -102,13 +102,21 @@ def detect_ChatGPT(image_path):
     t1 = time.time()
     results = model1(image_path, 608, 0.15)
     area_remove = []
-    table1 = results.pandas().xyxy[0]        
-    for item, (name_label, confidence) in enumerate(zip(table1['name'], table1['confidence'] * 100)):
-        for str_key, data_value in model1.names.items():
-            if values[f'{data_value}_1'] and data_value == name_label and confidence < int(values[f'{data_value}_Conf_1']):
-                table1.drop(item, axis=0, inplace=True)
-                area_remove.append(item)
-                break 
+    table1 = results.pandas().xyxy[0]  
+    for item in range(len(table1.index)):
+        conf1 = table1['confidence'][item] * 100
+        label_name = table1['name'][item]
+        for i1 in range(len(model1.names)):
+            if values[f'{model1.names[i1]}_1'] == True:
+                    if label_name == model1.names[i1]:
+                        if conf1 < int(values[f'{model1.names[i1]}_Conf_1']):
+                            table1.drop(item, axis=0, inplace=True)
+                            area_remove.append(item)
+            else:         
+                if label_name == model1.names[i1]:
+                    table1.drop(item, axis=0, inplace=True)
+                    area_remove.append(item)
+
     name = list(table1['name'])
     print(name)   
     show1 = np.squeeze(results.render(area_remove))
@@ -178,7 +186,7 @@ def make_window():
     window.Maximize()
     return window
 
-model1 = torch.hub.load('C:/Users/CCSX009/Documents/yolov5','custom', path="V:/test/best.pt", source='local', force_reload=False)
+model1 = torch.hub.load('C:/Users/CCSX009/Documents/yolov5','custom', path="V:/tamsat10/TAM_SAT_M100_A75_2024-05-20.pt", source='local', force_reload=False)
 os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 window = make_window()
 current_index = 0

@@ -1,0 +1,1 @@
+model3=C:/Users/Administrator/Documents/Model/GEJI_TAM_SAT_M100_2024-04-26.pt

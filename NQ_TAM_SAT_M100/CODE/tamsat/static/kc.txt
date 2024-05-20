@@ -1,0 +1,4 @@
+kc_tren_t=105
+kc_tren_c=205
+kc_duoi_t=105
+kc_duoi_c=205
