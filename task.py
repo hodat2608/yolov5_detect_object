@@ -204,11 +204,32 @@ def Connect_MySQLServer():
 
 def load_data_model_1():
     item_code = "ABC2D3F"
-    cursor,db_connection = Connect_MySQLServer()
+    cursor, db_connection = Connect_MySQLServer()
+    
+    # Lấy tất cả dữ liệu
     cursor.execute("SELECT * FROM test_model_cam1_model1 WHERE item_code = %s", (item_code,))
-    print(cursor.fetchone()[2])
+    
+    # Lấy tất cả các hàng vào một danh sách
+    records = cursor.fetchall()
+    cursor.close()
+    db_connection.close()
+    
+    if records:
+        # Truy cập hàng đầu tiên
+        first_record = records[0]
+        load_item_code = first_record[1]
+        load_path_weight = first_record[2]
+        load_confidence_all_scale = first_record[3]
+        
+   
+        
+        # In các bản ghi còn lại (bao gồm cả hàng đầu tiên nếu cần)
+        for record in records:
+            print(record[4])
 
-load_data_model_1()
+
+
+print(load_data_model_1())
     
 # def all():
 #     result = load_data_model_1()

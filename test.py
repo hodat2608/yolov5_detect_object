@@ -100,6 +100,7 @@ import time
 
 def detect_ChatGPT(image_path):
     t1 = time.time()
+    print(model1)
     results = model1(image_path, 608, 0.15)
     area_remove = []
     table1 = results.pandas().xyxy[0]  
@@ -186,7 +187,7 @@ def make_window():
     window.Maximize()
     return window
 
-model1 = torch.hub.load('C:/Users/CCSX009/Documents/yolov5','custom', path="V:/tamsat10/TAM_SAT_M100_A75_2024-05-20.pt", source='local', force_reload=False)
+model1 = torch.hub.load('C:/Users/CCSX009/Documents/yolov5','custom', path="C:/X75_M100_DEN_CAM1_2024-03-11.pt", source='local', force_reload=False)
 os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 window = make_window()
 current_index = 0
