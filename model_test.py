@@ -29,6 +29,118 @@ SCALE_Y_CAM1 = 1#960/1536
 SCALE_X_CAM2 = 1#640/1440
 SCALE_Y_CAM2 = 1#480/1080
 
+
+class MySQL_Connection():
+
+    def __init__(self,host,user,passwd,database):
+        self.host = host
+        self.user = user
+        self.passwd = passwd
+        self.database = database
+
+    def Connect_MySQLServer(self):
+            db_connection = mysql.connector.connect(
+            host= self.host,
+            user=self.user, 
+            passwd=self.passwd,
+            database=self.database)                    
+            cursor = db_connection.cursor()
+            return cursor,db_connection
+
+    def check_connection(self):
+        _,db_connection = self.Connect_MySQLServer()
+        try:
+            db_connection.ping(reconnect=True, attempts=3, delay=5)
+            return True
+        except mysql.connector.Error as err:
+            messagebox.showinfo("Notification", f"Error connecting to the database: {str(err)}")
+            return False
+
+    def reconnect(self):
+        _,db_connection = self.Connect_MySQLServer()
+        try:
+            db_connection.reconnect(attempts=3, delay=5)
+            cursor = db_connection.cursor()  
+            return True
+        except mysql.connector.Error as err:
+            messagebox.showinfo("Notification", f"Failed to reconnect to the database: {str(err)}")
+            return False
+      
+class PLC_Connection():
+
+    def __init__(self,host,port):
+        self.host = host
+        self.port = port
+      
+    def connect_plc_keyence(self):
+        try:
+            soc.connect((self.host, self.port))
+            return True
+        except OSError:
+            print("Can't connect to PLC")
+            time.sleep(3)
+            print("Reconnecting....")
+            return False
+
+    def run_plc_keyence(self):
+        connected = False
+        while connected == False:
+            connected = self.connect_plc_keyence(self.host,self.port)
+        print("connected") 
+
+    def read_plc_keyence(self,data):
+        a = 'RD '
+        c = '\x0D'
+        d = a+ data +c
+        datasend = d.encode("UTF-8")
+        soc.sendall(datasend)
+        data = soc.recv(1024)
+        datadeco = data.decode("UTF-8")
+        data1 = int(datadeco)
+        return data1
+
+    def write_plc_keyence(self,register,data):
+        a = 'WR '
+        b = ' '
+        c = '\x0D'
+        d = a+register+b+str(data)+c
+        datasend  = d.encode("UTF-8")
+        soc.sendall(datasend)
+        datares = soc.recv(1024)
+
+    def connect_plc_omron(self):
+        global fins_instance
+        try:
+            fins_instance = UDPFinsConnection()
+            fins_instance.connect(self.host)
+            fins_instance.dest_node_add=1
+            fins_instance.srce_node_add=25
+            return True
+        except:
+            print("Can't connect to PLC")
+            for i in range(100000000):
+                pass
+            print("Reconnecting....")
+            return False
+
+    def run_plc_omron(self):
+        connected = False
+        while connected == False:
+            connected = self.connect_plc_omron(self.host)
+            print('connecting ....')
+        print("connected plc") 
+
+    def read_plc_omron(self,register):
+        register = (register).to_bytes(2, byteorder='big') + b'\x00'
+        read_var = fins_instance.memory_area_read(FinsPLCMemoryAreas().DATA_MEMORY_WORD,register)
+        read_var = int.from_bytes(read_var[-2:], byteorder='big')  
+        return read_var
+
+    def write_plc_omron(self,register,data):
+        register = (register).to_bytes(2, byteorder='big') + b'\x00'
+        fins_instance.memory_area_write(FinsPLCMemoryAreas().DATA_MEMORY_WORD,register,b'\x00\x00',data)
+
+
 class CMyCallback:
     """
     Class that contains a callback function.
@@ -376,10 +488,16 @@ class Main_Display():
                 if img1_orgin is None:
                     print('loading img 1...')
                     continue
-                image_result,time_processing = handle_image.processing_handle_image(img1_orgin)
+                image_result,time_processing,results_detect = handle_image.processing_handle_image(img1_orgin)
                 # time_processing_output.delete(0, tk.END)
                 # time_processing_output.insert(0, f'{time_processing}')
+
                 time_processing_output.config(text=f'{time_processing}')
+                if results_detect == 'OK':
+                    result_detection.config(text=results_detect,fg='green')
+                else :
+                    result_detection.config(text=results_detect,fg='red')
+
                 img_pil = Image.fromarray(image_result)
                 photo = ImageTk.PhotoImage(img_pil)
                 image_label = tk.Label(camera_frame, image=photo)
@@ -392,28 +510,144 @@ class Main_Display():
         # self.display_images(camera2_frame, 2)
         window.after(100, self.update_images,window,camera1_frame, camera2_frame)
 
-    def create_camera_frame_cam1(self,notebook, camera_number):
-        global time_processing_output
-        camera_frame = ttk.LabelFrame(notebook, text=f"Camera {camera_number}", width=800, height=800)
-        camera_frame.grid(row=0, column=camera_number-1, padx=80, pady=20, sticky="nws")
-        time_frame = ttk.LabelFrame(notebook, text=f"Time Processing Camera {camera_number}", width=400, height=100)
-        time_frame.grid(row=1, column=camera_number-1, padx=80, pady=10, sticky="nws")
-        # time_processing_output = tk.Entry(time_frame, fg='black', font=('Segoe UI', 30), width=20)
-        # time_processing_output.grid(row=0, column=0, padx=10, pady=10, sticky='w')
-        time_processing_output = tk.Label(time_frame, text='0 ms', fg='black', font=('Segoe UI', 30), width=20, anchor='center')
+    def create_camera_frame_cam1(self, tab1, camera_number):
+
+        global time_processing_output, result_detection
+
+        style = ttk.Style()
+        style.configure("Custom.TLabelframe", borderwidth=0)
+        style.configure("Custom.TLabelframe.Label", background="white", foreground="white")
+
+        # Tạo khung chứa tổng thể
+        frame_1 = ttk.LabelFrame(tab1, width=900, height=900, style="Custom.TLabelframe")
+        frame_1.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
+
+        # Tạo khung cho camera
+        camera_frame = ttk.LabelFrame(frame_1, text=f"Camera {camera_number}", width=800, height=800)
+        camera_frame.grid(row=0, column=0, columnspan=3, padx=10, pady=10, sticky="nsew")
+
+        # Tạo khung cho thời gian xử lý
+        time_frame = ttk.LabelFrame(frame_1, text=f"Time Processing Camera {camera_number}", width=300, height=100)
+        time_frame.grid(row=1, column=0, padx=10, pady=5, sticky="ew")
+
+        time_processing_output = tk.Label(time_frame, text='0 ms', fg='black', font=('Segoe UI', 30), width=10, height=1, anchor='center')
         time_processing_output.grid(row=0, column=0, padx=10, pady=10, sticky='ew')
+
+        # Tạo khung cho kết quả
+        result = ttk.LabelFrame(frame_1, text=f"Result Camera {camera_number}", width=300, height=100)
+        result.grid(row=1, column=1, padx=10, pady=5, sticky="ew")
+
+        result_detection = tk.Label(result, text='ERROR', fg='red', font=('Segoe UI', 30), width=10, height=1, anchor='center')
+        result_detection.grid(row=0, column=0, padx=10, pady=10, sticky='ew')
+
+        # Tạo khung bonus
+        bonus = ttk.LabelFrame(frame_1, text=f"Bonus {camera_number}", width=300, height=100)
+        bonus.grid(row=1, column=2, padx=10, pady=5, sticky="ew")
+
+        bonus_test = tk.Label(bonus, text='Bonus', fg='red', font=('Segoe UI', 30), width=10, height=1, anchor='center')
+        bonus_test.grid(row=0, column=0, padx=10, pady=10, sticky='ew')
+
+        # Đặt tỉ lệ co dãn cho các hàng và cột để giao diện được căn chỉnh đúng
+        frame_1.grid_columnconfigure(0, weight=1)
+        frame_1.grid_columnconfigure(1, weight=1)
+        frame_1.grid_columnconfigure(2, weight=1)
+        frame_1.grid_rowconfigure(0, weight=1)
+        frame_1.grid_rowconfigure(1, weight=1)
+
         return camera_frame
     
-    def create_camera_frame_cam2(self,notebook, camera_number):
-        # global time_processing_output
-        camera_frame = ttk.LabelFrame(notebook, text=f"Camera {camera_number}", width=800, height=800)
-        camera_frame.grid(row=0, column=camera_number-1, padx=80, pady=20, sticky="nws")
-        time_frame = ttk.LabelFrame(notebook, text=f"Time Processing Camera {camera_number}", width=400, height=100)
-        time_frame.grid(row=1, column=camera_number-1, padx=80, pady=10, sticky="nws")
-        # time_processing_output = tk.Entry(time_frame, fg='black', font=('Segoe UI', 30), width=20)
-        # time_processing_output.grid(row=0, column=0, padx=10, pady=10, sticky='w')
-        time_processing_output = tk.Label(time_frame, text='0 ms', fg='black', font=('Segoe UI', 30), width=20, anchor='w')
-        time_processing_output.grid(row=0, column=0, padx=10, pady=10, sticky='w')
+    # def create_camera_frame_cam2(self, tab1, camera_number):
+
+    #     global time_processing_output_2, result_detection_2
+
+    #     style = ttk.Style()
+    #     style.configure("Custom.TLabelframe", borderwidth=0)
+    #     style.configure("Custom.TLabelframe.Label", background="white", foreground="white")
+
+    #     # Tạo khung chứa tổng thể
+    #     frame_2 = ttk.LabelFrame(tab1, width=900, height=900, style="Custom.TLabelframe")
+    #     frame_2.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
+
+    #     # Tạo khung cho camera
+    #     camera_frame = ttk.LabelFrame(frame_2, text=f"Camera {camera_number}", width=900, height=700)
+    #     camera_frame.grid(row=0, column=0, columnspan=3, padx=10, pady=10, sticky="nsew")
+
+    #     # Tạo khung cho thời gian xử lý
+    #     time_frame = ttk.LabelFrame(frame_2, text=f"Time Processing Camera {camera_number}", width=300, height=100)
+    #     time_frame.grid(row=1, column=0, padx=10, pady=5, sticky="ew")
+
+    #     time_processing_output_2 = tk.Label(time_frame, text='0 ms', fg='black', font=('Segoe UI', 30), width=10, height=1, anchor='center')
+    #     time_processing_output_2.grid(row=0, column=0, padx=10, pady=10, sticky='ew')
+
+    #     # Tạo khung cho kết quả
+    #     result = ttk.LabelFrame(frame_2, text=f"Result Camera {camera_number}", width=300, height=100)
+    #     result.grid(row=1, column=1, padx=10, pady=5, sticky="ew")
+
+    #     result_detection_2 = tk.Label(result, text='ERROR', fg='red', font=('Segoe UI', 30), width=10, height=1, anchor='center')
+    #     result_detection_2.grid(row=0, column=0, padx=10, pady=10, sticky='ew')
+
+    #     # Tạo khung bonus
+    #     bonus = ttk.LabelFrame(frame_2, text=f"Bonus {camera_number}", width=300, height=100)
+    #     bonus.grid(row=1, column=2, padx=10, pady=5, sticky="ew")
+
+    #     bonus_test = tk.Label(bonus, text='Bonus', fg='red', font=('Segoe UI', 30), width=10, height=1, anchor='center')
+    #     bonus_test.grid(row=0, column=0, padx=10, pady=10, sticky='ew')
+
+    #     # Đặt tỉ lệ co dãn cho các hàng và cột để giao diện được căn chỉnh đúng
+    #     frame_2.grid_columnconfigure(0, weight=1)
+    #     frame_2.grid_columnconfigure(1, weight=1)
+    #     frame_2.grid_columnconfigure(2, weight=1)
+    #     frame_2.grid_rowconfigure(0, weight=1)
+    #     frame_2.grid_rowconfigure(1, weight=1)
+
+    #     return camera_frame
+
+
+    def create_camera_frame_cam2(self, tab1, camera_number):
+
+        global time_processing_output_2, result_detection_2
+
+        style = ttk.Style()
+        style.configure("Custom.TLabelframe", borderwidth=0)
+        style.configure("Custom.TLabelframe.Label", background="white", foreground="white")
+
+        # Tạo khung chứa tổng thể
+        frame_2 = ttk.LabelFrame(tab1, width=900, height=900, style="Custom.TLabelframe")
+        frame_2.grid(row=0, column=1, padx=200, pady=10, sticky="nsew")
+
+        # Tạo khung cho camera
+        camera_frame = ttk.LabelFrame(frame_2, text=f"Camera {camera_number}", width=800, height=800)
+        camera_frame.grid(row=0, column=0, columnspan=3, padx=10, pady=10, sticky="nsew")
+
+        # Tạo khung cho thời gian xử lý
+        time_frame = ttk.LabelFrame(frame_2, text=f"Time Processing Camera {camera_number}", width=300, height=100)
+        time_frame.grid(row=1, column=0, padx=10, pady=5, sticky="ew")
+
+        time_processing_output_2 = tk.Label(time_frame, text='0 ms', fg='black', font=('Segoe UI', 30), width=10, height=1, anchor='center')
+        time_processing_output_2.grid(row=0, column=0, padx=10, pady=10, sticky='ew')
+
+        # Tạo khung cho kết quả
+        result = ttk.LabelFrame(frame_2, text=f"Result Camera {camera_number}", width=300, height=100)
+        result.grid(row=1, column=1, padx=10, pady=5, sticky="ew")
+
+        result_detection_2 = tk.Label(result, text='ERROR', fg='red', font=('Segoe UI', 30), width=10, height=1, anchor='center')
+        result_detection_2.grid(row=0, column=0, padx=10, pady=10, sticky='ew')
+
+        # Tạo khung bonus
+        bonus = ttk.LabelFrame(frame_2, text=f"Bonus {camera_number}", width=300, height=100)
+        bonus.grid(row=1, column=2, padx=10, pady=5, sticky="ew")
+
+        bonus_test = tk.Label(bonus, text='Bonus', fg='red', font=('Segoe UI', 30), width=10, height=1, anchor='center')
+        bonus_test.grid(row=0, column=0, padx=10, pady=10, sticky='ew')
+
+        # Đặt tỉ lệ co dãn cho các hàng và cột để giao diện được căn chỉnh đúng
+
+        frame_2.grid_columnconfigure(0, weight=1)
+        frame_2.grid_columnconfigure(1, weight=1)
+        frame_2.grid_columnconfigure(2, weight=1)
+        frame_2.grid_rowconfigure(0, weight=1)
+        frame_2.grid_rowconfigure(1, weight=1)
+
         return camera_frame
 
     def Display_Camera(self,notebook):
@@ -426,11 +660,10 @@ class Main_Display():
         return camera1_frame, camera2_frame
 
 
-class Model_Camera_1():
+class Model_Camera_1(PLC_Connection,MySQL_Connection):
     
     def __init__(self):
-        # self.notebook = notebook
-        self.item_code_cfg = "ABC2D3F"
+        self.item_code_cfg = "EDFWTA"    
 
     def connect_database(self):
         database = MySQL_Connection("127.0.0.1","root1","987654321","model_1")
@@ -438,8 +671,66 @@ class Model_Camera_1():
         check_connection = database.check_connection()
         reconnect = database.reconnect()
         return cursor,db_connection,check_connection,reconnect
-
+    
     def save_data_model_1(self, weights, scale_conf_all, item_code, model_name_labels, join, ok_vars, ng_vars, num_inputs, wn_inputs, wx_inputs, hn_inputs, hx_inputs, plc_inputs, conf_scales):
+        confirm_save_data = messagebox.askokcancel("Confirm", "Are you sure you want to save the data?")
+        
+        if confirm_save_data:
+            cursor, db_connection, check_connection, reconnect = self.connect_database()
+            if not check_connection and not reconnect:
+                print(check_connection, reconnect)
+                return
+            try:
+                weight = weights.get()
+                confidence_all = int(scale_conf_all.get())
+                item_code_value = str(item_code.get())
+                cursor.execute("DELETE FROM test_model_cam1_model1 WHERE item_code = %s", (item_code_value,))
+                for i1 in range(len(model_name_labels)):
+                    label_name = model_name_labels[i1].cget("text")
+                    join_detect = join[i1].get()
+                    OK_jont = ok_vars[i1].get()
+                    NG_jont = ng_vars[i1].get()
+                    num_labels = int(num_inputs[i1].get())
+                    width_min = int(wn_inputs[i1].get())
+                    width_max = int(wx_inputs[i1].get())
+                    height_min = int(hn_inputs[i1].get())
+                    height_max = int(hx_inputs[i1].get())
+                    PLC_value = int(plc_inputs[i1].get())
+                    cmpnt_conf = int(conf_scales[i1].get())
+                    print(label_name)
+                    print(join_detect)
+                    print(OK_jont)
+                    print(NG_jont)
+                    print(num_labels)
+                    print(width_min)
+                    print(width_max)
+                    print(height_min)
+                    print(height_max)
+                    print(cmpnt_conf)
+                    print('-----------------------')
+
+                    query_sql = """
+                    INSERT INTO test_model_cam1_model1
+                    (item_code, weight, confidence_all, label_name, join_detect, OK, NG, num_labels, width_min, width_max, 
+                    height_min, height_max, PLC_value, cmpnt_conf)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """
+                    values = (item_code_value, weight, confidence_all, label_name, join_detect, OK_jont, NG_jont, num_labels, 
+                            width_min, width_max, height_min, height_max, PLC_value, cmpnt_conf)
+                    cursor.execute(query_sql, values)
+
+                db_connection.commit()
+                cursor.close()
+                db_connection.close()
+                messagebox.showinfo("Notification", "Saved parameters successfully!")
+            except Exception as e:
+                cursor.close()
+                db_connection.close()
+                messagebox.showinfo("Notification", f"Data saved failed! Error: {str(e)}")
+        else:
+            pass
+
+    def save_data_model_1_bk(self, weights, scale_conf_all, item_code, model_name_labels, join, ok_vars, ng_vars, num_inputs, wn_inputs, wx_inputs, hn_inputs, hx_inputs, plc_inputs, conf_scales):
         confirm_save_data = messagebox.askokcancel("Confirm", "Are you sure you want to save the data?")
         
         if confirm_save_data:
@@ -448,8 +739,8 @@ class Model_Camera_1():
                 print( check_connection, reconnect)
                 return
             try:
-                cursor.execute("SELECT COUNT(*) FROM test_model_cam1_model1 WHERE item_code = %s", (str(item_code.get()),))
-                exists = cursor.fetchone()[0] > 0
+                # cursor.execute("SELECT COUNT(*) FROM test_model_cam1_model1 WHERE item_code = %s", (str(item_code.get()),))
+                # exists = cursor.fetchone()[0] > 0
 
                 weight = weights.get()
                 confidence_all = int(scale_conf_all.get())
@@ -479,6 +770,9 @@ class Model_Camera_1():
                     print(height_max)
                     print(cmpnt_conf)
                     print('-----------------------')
+
+                    cursor.execute("SELECT COUNT(*) FROM test_model_cam1_model1 WHERE item_code = %s AND label_name = %s", (item_code_value, label_name))
+                    exists = cursor.fetchone()[0] > 0
 
                     if exists:
                         query_sql = """
@@ -560,21 +854,75 @@ class Model_Camera_1():
 
                     conf_scales[i1].set(record[14])
         
-    def change_model_1(self,Frame_2,weights,scale_conf_all,item_code):
+    def change_model_1(self,Frame_2,weights):
         global model1
         selected_file = filedialog.askopenfilename(title="Choose a file", filetypes=[("Model Files", "*.pt")])
         if selected_file:
             weights.delete(0,tk.END)
             weights.insert(0,selected_file)
-            item_code.delete(0,tk.END)
-            scale_conf_all.set(15)
+            # item_code.delete(0,tk.END)
+            # scale_conf_all.set(15)
             model1 = torch.hub.load('C:/Users/CCSX009/Documents/yolov5','custom', path=selected_file, source='local', force_reload=False)
             for widget in Frame_2.grid_slaves():
                 widget.grid_forget()
-            self.option_1_parameters(Frame_2,model1)    
+            self.option_1_parameters(Frame_2,model1)  
+
+    def load_parameters_from_weight(self,weights, item_code):
+        confirm_load_parameters = messagebox.askokcancel("Confirm", "Are you sure you want to load the parameters?")
+        # weight = weights.get()
+        # item_code_value = str(item_code.get())
+        # cursor, db_connection,_,_ = self.connect_database()
+        # cursor.execute("SELECT * FROM test_model_cam1_model1 WHERE item_code = %s", (item_code_value))
+        # cursor.close()
+        # db_connection.close()
+        # records = cursor.fetchall()
+        # model = torch.hub.load('C:/Users/CCSX009/Documents/yolov5','custom', path=weight, source='local', force_reload=False)
+        if confirm_load_parameters :
+            try: 
+                for i1 in range(len(model1.names)):
+                    for record in records:
+                        if record[4] == model1.names[i1]:
+
+                            join[i1].set(bool(record[5]))
+
+                            ok_vars[i1].set(bool(record[6]))
+
+                            ng_vars[i1].set(bool(record[7]))
+
+                            num_inputs[i1].delete(0, tk.END)
+                            num_inputs[i1].insert(0, record[8])
+
+                            wn_inputs[i1].delete(0, tk.END)
+                            wn_inputs[i1].insert(0, record[9])
+
+                            wx_inputs[i1].delete(0, tk.END)
+                            wx_inputs[i1].insert(0, record[10])
+
+                            hn_inputs[i1].delete(0, tk.END)
+                            hn_inputs[i1].insert(0, record[11])
+                            
+                            hx_inputs[i1].delete(0, tk.END)
+                            hx_inputs[i1].insert(0, record[12])
+
+                            plc_inputs[i1].delete(0, tk.END)
+                            plc_inputs[i1].insert(0, record[13])
+
+                            conf_scales[i1].set(record[14])
+
+                messagebox.showinfo("Notification", "Loaded parameters successfully!")
+            except Exception as e:
+                messagebox.showinfo("Notification", f"Parameters Loaded failed! Error: {str(e)}")
+        else:
+            pass
+
+    def detect_single_img(self,):
+        pass
+
+    def detect_multi_img(self,):
+        pass
 
     def Camera_1_Settings(self,notebook):
-        global model1
+        global model1,records
         records,load_path_weight,load_item_code,load_confidence_all_scale = self.load_data_model_1()
         
         model1 = torch.hub.load('C:/Users/CCSX009/Documents/yolov5','custom', path=load_path_weight, source='local', force_reload=False)
@@ -582,11 +930,30 @@ class Model_Camera_1():
         camera_settings_tab = ttk.Frame(notebook)
         notebook.add(camera_settings_tab, text="Camera 1 Settings")
 
+        canvas = tk.Canvas(camera_settings_tab)
+        scrollbar = ttk.Scrollbar(camera_settings_tab, orient="vertical", command=canvas.yview)
+        scrollable_frame = ttk.Frame(canvas)
+
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(
+                scrollregion=canvas.bbox("all")
+            )
+        )
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        canvas.grid(row=0, column=0, sticky="nsew")
+        scrollbar.grid(row=0, column=1, sticky="ns")
+
+        camera_settings_tab.grid_columnconfigure(0, weight=1)
+        camera_settings_tab.grid_rowconfigure(0, weight=1)
+
         frame_width = 1500
         frame_height = 2000
 
-        Frame_1 = ttk.LabelFrame(camera_settings_tab, text="Frame 1", width=frame_width, height=frame_height)
-        Frame_2 = ttk.LabelFrame(camera_settings_tab, text="Frame 2", width=frame_width, height=frame_height)
+        Frame_1 = ttk.LabelFrame(scrollable_frame, text="Frame 1", width=frame_width, height=frame_height)
+        Frame_2 = ttk.LabelFrame(scrollable_frame, text="Frame 2", width=frame_width, height=frame_height)
 
         Frame_1.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")  
         Frame_2.grid(row=0, column=1, padx=10, pady=10, sticky="nsew")
@@ -595,48 +962,71 @@ class Model_Camera_1():
         self.option_1_layout_models(Frame_1,Frame_2)
         self.option_1_parameters(Frame_2,model1)
         self.load_parameters_model_1(model1,records,load_path_weight,load_item_code,load_confidence_all_scale)
-       
-    def option_1_layout_models(self,Frame_1, Frame_2):
 
-        global weights,scale_conf_all,size_model,item_code
-        
+        scrollable_frame.grid_columnconfigure(0, weight=1)
+        scrollable_frame.grid_columnconfigure(1, weight=1)
+        scrollable_frame.grid_rowconfigure(0, weight=1)
+        scrollable_frame.grid_rowconfigure(1, weight=1)
+
+    def option_1_layout_models(self, Frame_1, Frame_2):
+        global weights, scale_conf_all, size_model, item_code
+
         ttk.Label(Frame_1, text='1. File train detect model', font=('Segoe UI', 12)).grid(column=0, row=0, padx=10, pady=5, sticky="nws")
 
-        weights = ttk.Entry(Frame_1, width=50)
-        weights.grid(row=1, column=0, columnspan=5, padx=30, pady=5, sticky="w", ipadx=100, ipady=2)
+        weights = ttk.Entry(Frame_1, width=60)
+        weights.grid(row=1, column=0, columnspan=5, padx=(30, 5), pady=5, sticky="w", ipadx=20, ipady=2)
 
-        change_model_button = tk.Button(Frame_1, text="Change Model", command=lambda: self.change_model_1(Frame_2, weights,scale_conf_all,item_code))
-        change_model_button.grid(row=1, column=1, padx=10, pady=5, sticky="w", ipadx=5, ipady=2)
+        button_frame = ttk.Frame(Frame_1)
+        button_frame.grid(row=2, column=0, columnspan=2, padx=(30, 30), pady=5, sticky="w")
 
-        label_scale_conf_all = ttk.Label(Frame_1, text='2. Confidence all', font=('Segoe UI', 12))
-        label_scale_conf_all.grid(row=2, column=0, padx=10, pady=5, sticky="nws")
-        
-        scale_conf_all = tk.Scale(Frame_1, from_=1, to=100, orient='horizontal', length=500)
-        scale_conf_all.grid(row=3, column=0, padx=30, pady=5, sticky="nws")
+        change_model_button = tk.Button(button_frame, text="Change Model", command=lambda: self.change_model_1(Frame_2, weights))
+        change_model_button.grid(row=0, column=0, padx=(0, 8), pady=5, sticky="w", ipadx=5, ipady=2)
 
-        label_size_model = ttk.Label(Frame_1, text='2. Size Detection', font=('Segoe UI', 12))
-        label_size_model.grid(row=4, column=0, padx=10, pady=5, sticky="nws")
-        
+        load_parameters = tk.Button(button_frame, text="Load Parameters", command=lambda: self.load_parameters_from_weight(weights, item_code))
+        load_parameters.grid(row=0, column=1, padx=(0, 8), pady=5, sticky="w", ipadx=5, ipady=2)
+
+        custom_para = tk.Button(button_frame, text="Custom Parameters")
+        custom_para.grid(row=0, column=2, padx=(0, 8), pady=5, sticky="w", ipadx=5, ipady=2)
+
+        label_scale_conf_all = ttk.Label(Frame_1, text='2. Confidence Threshold', font=('Segoe UI', 12))
+        label_scale_conf_all.grid(row=3, column=0, columnspan=2, padx=10, pady=5, sticky="nws")
+
+        scale_conf_all = tk.Scale(Frame_1, from_=1, to=100, orient='horizontal', length=400)
+        scale_conf_all.grid(row=4, column=0, columnspan=2, padx=30, pady=5, sticky="nws")
+
+        label_size_model = ttk.Label(Frame_1, text='2. Size Model', font=('Segoe UI', 12))
+        label_size_model.grid(row=5, column=0, columnspan=2, padx=10, pady=5, sticky="nws")
+
         options = [468, 608, 832]
-        size_model = ttk.Combobox(Frame_1, values=options)
-        size_model.grid(row=5, column=0, padx=30, pady=5, sticky="nws")
+        size_model = ttk.Combobox(Frame_1, values=options, width=7)
+        size_model.grid(row=6, column=0, columnspan=2, padx=30, pady=5, sticky="nws", ipadx=5, ipady=2)
         size_model.set(608)
 
-        name_item_code = ttk.Label(Frame_1, text='3. Item code', font=('Segoe UI', 12))
-        name_item_code.grid(row=6, column=0, padx=10, pady=5, sticky="nws")
+        name_item_code = ttk.Label(Frame_1, text='3. Item Code', font=('Segoe UI', 12))
+        name_item_code.grid(row=7, column=0, columnspan=2, padx=10, pady=5, sticky="nws")
 
-        item_code = ttk.Entry(Frame_1, width=50)
-        item_code.grid(row=7, column=0, columnspan=5, padx=30, pady=5, sticky="w", ipadx=20, ipady=2)
+        item_code = ttk.Entry(Frame_1, width=10)
+        item_code.grid(row=8, column=0, columnspan=2, padx=30, pady=5, sticky="w", ipadx=5, ipady=2)
 
-        save_data_to_database = ttk.Button(Frame_1, text='Apply', command=lambda: self.save_data_model_1(weights,scale_conf_all,item_code,model_name_labels, join, ok_vars, ng_vars, num_inputs,  wn_inputs, wx_inputs, hn_inputs, hx_inputs, plc_inputs, conf_scales))
-        save_data_to_database.grid(row=8, column=0, padx=30, pady=5, sticky="w", ipadx=5, ipady=2)
+        save_data_to_database = ttk.Button(Frame_1, text='Apply', command=lambda: self.save_data_model_1(weights, scale_conf_all, item_code, model_name_labels, join, ok_vars, ng_vars, num_inputs, wn_inputs, wx_inputs, hn_inputs, hx_inputs, plc_inputs, conf_scales))
+        save_data_to_database.grid(row=9, column=0, columnspan=2, padx=30, pady=5, sticky="w", ipadx=5, ipady=2)
 
-        camera_frame_display = ttk.Label(Frame_1, text='4. Display Camera', font=('Segoe UI', 12))
-        camera_frame_display.grid(row=9, column=0, padx=10, pady=5, sticky="nws")
+        camera_frame_display = ttk.Label(Frame_1, text='4. Modify Image', font=('Segoe UI', 12))
+        camera_frame_display.grid(row=10, column=0, columnspan=2, padx=10, pady=5, sticky="nws")
 
         camera_frame = ttk.LabelFrame(Frame_1, text=f"Camera 1", width=500, height=500)
-        camera_frame.grid(row=10, column=0, padx=30, pady=5, sticky="nws")
+        camera_frame.grid(row=11, column=0, columnspan=2, padx=30, pady=5, sticky="nws")
 
+        camera_custom_setup = ttk.Frame(Frame_1)
+        camera_custom_setup.grid(row=12, column=0, columnspan=2, padx=(30, 30), pady=5, sticky="w") 
+
+        single_img = tk.Button(camera_custom_setup, text="Only Image", command=lambda: self.detect_single_img(Frame_2, weights))
+        single_img.grid(row=0, column=0, padx=(0, 8), pady=5, sticky="w", ipadx=5, ipady=2)
+
+        multi_img = tk.Button(camera_custom_setup, text="Multi Image", command=lambda: self.detect_multi_img(weights, item_code))
+        multi_img.grid(row=0, column=1, padx=(0, 8), pady=5, sticky="w", ipadx=5, ipady=2)
+
+    
     def option_1_parameters(self,Frame_2,model1):
         
         global model_name_labels, join, ok_vars, ng_vars, num_inputs, wn_inputs, wx_inputs, hn_inputs, hx_inputs, plc_inputs, conf_scales
@@ -666,65 +1056,98 @@ class Model_Camera_1():
         conf_scales = []
         widgets = []
 
+        label = tk.Label(Frame_2, text='LABEL', fg='red', font=('Ubuntu', 12), width=12, anchor='center', relief="groove", borderwidth=2)
+        label.grid(row=0, column=0, padx=15, pady=5, sticky="w", ipadx=2, ipady=2)
+
+        joint_detect = tk.Label(Frame_2, text='JOIN', fg='red', font=('Ubuntu', 12), anchor='center', relief="groove", borderwidth=2)
+        joint_detect.grid(row=0, column=1, padx=15, pady=5, sticky="w", ipadx=2, ipady=2)
+
+        ok_joint = tk.Label(Frame_2, text='OK', fg='red', font=('Ubuntu', 12), anchor='center', relief="groove", borderwidth=2)
+        ok_joint.grid(row=0, column=2, padx=15, pady=5, sticky="w", ipadx=2, ipady=2)
+
+        ng_joint = tk.Label(Frame_2, text='NG', fg='red', font=('Ubuntu', 12), anchor='center', relief="groove", borderwidth=2)
+        ng_joint.grid(row=0, column=3, padx=15, pady=5, sticky="w", ipadx=2, ipady=2)
+
+        num_lb = tk.Label(Frame_2, text='NUM', fg='red', font=('Ubuntu', 12), width=7, anchor='center', relief="groove", borderwidth=2)
+        num_lb.grid(row=0, column=4, padx=15, pady=5, sticky="w", ipadx=2, ipady=2)
+
+        width_n = tk.Label(Frame_2, text='W_N', fg='red', font=('Ubuntu', 12), width=7, anchor='center', relief="groove", borderwidth=2)
+        width_n.grid(row=0, column=5, padx=15, pady=5, sticky="w", ipadx=2, ipady=2)
+
+        wight_x= tk.Label(Frame_2, text='W_X', fg='red', font=('Ubuntu', 12), width=7, anchor='center', relief="groove", borderwidth=2)
+        wight_x.grid(row=0, column=6, padx=15, pady=5, sticky="w", ipadx=2, ipady=2)
+
+        height_n = tk.Label(Frame_2, text='H_N', fg='red', font=('Ubuntu', 12), width=7, anchor='center', relief="groove", borderwidth=2)
+        height_n.grid(row=0, column=7, padx=15, pady=5, sticky="w", ipadx=2, ipady=2)
+
+        height_x = tk.Label(Frame_2, text='H_X', fg='red', font=('Ubuntu', 12), width=7, anchor='center', relief="groove", borderwidth=2)
+        height_x.grid(row=0, column=8, padx=15, pady=5, sticky="w", ipadx=2, ipady=2)
+
+        plc_var = tk.Label(Frame_2, text='PLC', fg='red', font=('Ubuntu', 12), width=7, anchor='center', relief="groove", borderwidth=2)
+        plc_var.grid(row=0, column=9, padx=15, pady=5, sticky="w", ipadx=2, ipady=2)
+
+        conf = tk.Label(Frame_2, text='CONFIDENCE THRESHOLD', fg='red', font=('Ubuntu', 12), width=30, anchor='center', relief="groove", borderwidth=2)
+        conf.grid(row=0, column=10, padx=15, pady=5, sticky="w", ipadx=2, ipady=2)
+
         for i1 in range(len(model1.names)):
             row_widgets = []
 
-            model_name_label = tk.Label(Frame_2, text=f'{model1.names[i1]}', fg='black', font=('Segoe UI', 12), width=20, anchor='w')
+            model_name_label = tk.Label(Frame_2, text=f'{model1.names[i1]}', fg='black', font=('Segoe UI', 12), width=15, anchor='w')
             row_widgets.append(model_name_label)
             model_name_labels.append(model_name_label)
 
             join_checkbox_var = tk.BooleanVar()
-            join_checkbox = tk.Checkbutton(Frame_2, variable=join_checkbox_var, onvalue=True, offvalue=False)
+            join_checkbox = tk.Checkbutton(Frame_2, variable=join_checkbox_var, onvalue=True, offvalue=False,anchor='w')
             join_checkbox.grid()
             join_checkbox.var = join_checkbox_var
             row_widgets.append(join_checkbox)
             join.append(join_checkbox_var)
 
             ok_checkbox_var = tk.BooleanVar()
-            ok_checkbox = tk.Checkbutton(Frame_2, variable=ok_checkbox_var, onvalue=True, offvalue=False, command=lambda rw=row_widgets:ok_selected(rw))
+            ok_checkbox = tk.Checkbutton(Frame_2, variable=ok_checkbox_var, onvalue=True, offvalue=False, command=lambda rw=row_widgets:ok_selected(rw), anchor='w')
             ok_checkbox.grid()
             ok_checkbox.var = ok_checkbox_var
             row_widgets.append(ok_checkbox)
             ok_vars.append(ok_checkbox_var)
 
             ng_checkbox_var = tk.BooleanVar()
-            ng_checkbox = tk.Checkbutton(Frame_2, variable=ng_checkbox_var, onvalue=True, offvalue=False, command=lambda rw=row_widgets:ng_selected(rw))
+            ng_checkbox = tk.Checkbutton(Frame_2, variable=ng_checkbox_var, onvalue=True, offvalue=False, command=lambda rw=row_widgets:ng_selected(rw), anchor='w')
             ng_checkbox.grid()
             ng_checkbox.var = ng_checkbox_var
             row_widgets.append(ng_checkbox)
             ng_vars.append(ng_checkbox_var)
 
-            num_input = tk.Entry(Frame_2, width=7)
+            num_input = tk.Entry(Frame_2, width=7,)
             num_input.insert(0, '1')
             row_widgets.append(num_input)
             num_inputs.append(num_input)
 
-            wn_input = tk.Entry(Frame_2, width=7)
+            wn_input = tk.Entry(Frame_2, width=7, )
             wn_input.insert(0, '0')
             row_widgets.append(wn_input)
             wn_inputs.append(wn_input)
 
-            wx_input = tk.Entry(Frame_2, width=7)
+            wx_input = tk.Entry(Frame_2, width=7, )
             wx_input.insert(0, '1600')
             row_widgets.append(wx_input)
             wx_inputs.append(wx_input)
 
-            hn_input = tk.Entry(Frame_2, width=7)
+            hn_input = tk.Entry(Frame_2, width=7, )
             hn_input.insert(0, '0')
             row_widgets.append(hn_input)
             hn_inputs.append(hn_input)
 
-            hx_input = tk.Entry(Frame_2, width=7)
+            hx_input = tk.Entry(Frame_2, width=7, )
             hx_input.insert(0, '1200')
             row_widgets.append(hx_input)
             hx_inputs.append(hx_input)
 
-            plc_input = tk.Entry(Frame_2, width=7)
+            plc_input = tk.Entry(Frame_2, width=7,)
             plc_input.insert(0, '0')
             row_widgets.append(plc_input)
             plc_inputs.append(plc_input)
 
-            conf_scale = tk.Scale(Frame_2, from_=1, to=100, orient='horizontal', length=280)
+            conf_scale = tk.Scale(Frame_2, from_=1, to=100, orient='horizontal', length=280,)
             row_widgets.append(conf_scale)
             conf_scales.append(conf_scale)
 
@@ -776,127 +1199,50 @@ class Model_Camera_1():
                         if join_detect == False:
                             if label_name_tables == model1.names[j1]:
                                 label_remove.append(item)
-
         table_results.drop(index=label_remove, inplace=True)   
-        names = list(table_results['name'])  
-        print(names)               
+        name_rest = list(table_results['name'])                
         show1 = np.squeeze(results.render(label_remove))
         show1 = cv2.resize(show1, (800,800), interpolation=cv2.INTER_AREA)
+        results_detect = 'ERROR'
+        ok_variable = False
+        for j1 in range(len(model1.names)):
+            for i1 in range(len(model_name_labels)):
+                label_name = model_name_labels[i1].cget("text")
+                join_detect = join[i1].get()
+                OK_jont = ok_vars[i1].get()
+                NG_jont = ng_vars[i1].get()
+                num_labels_setting = int(num_inputs[i1].get())
+                width_min = int(wn_inputs[i1].get())
+                width_max = int(wx_inputs[i1].get())
+                height_min = int(hn_inputs[i1].get())
+                height_max = int(hx_inputs[i1].get())
+                PLC_value = int(plc_inputs[i1].get())
+                cmpnt_conf = int(conf_scales[i1].get())
+                if label_name == model1.names[j1]:  
+                    # print(f'{label_name}--{model1.names[j1]}------{join_detect}')
+                    if join_detect == True:
+                        if OK_jont == True:
+                            number_of_labels = name_rest.count(model1.names[j1])
+                            if number_of_labels != num_labels_setting:
+                                results_detect = 'NG'
+                                ok_variable = True
+                                # self.write_plc_keyence(PLC_value,1)
+                            
+                        if NG_jont == True:
+                            for label in name_rest:
+                                if label == label_name: 
+                                    print(f'{label}={label_name}')
+                                    results_detect = 'NG'
+                                    ok_variable = True
+                                    # self.write_plc_keyence(PLC_value,1)
+        if not ok_variable:
+            results_detect = 'OK'
+            # self.write_plc_keyence(PLC_value,2)
         t2 = time.time() - t1
         time_processing = str(int(t2*1000)) + 'ms'
-        return show1,time_processing
-        
+        return show1,time_processing,results_detect
+  
 
-class PLC_Connection():
-
-    def __init__(self,host,port):
-        self.host = host
-        self.port = port
-      
-    def connect_plc_keyence(self):
-        try:
-            soc.connect((self.host, self.port))
-            return True
-        except OSError:
-            print("Can't connect to PLC")
-            time.sleep(3)
-            print("Reconnecting....")
-            return False
-
-    def run_plc_keyence(self):
-        connected = False
-        while connected == False:
-            connected = self.connect_plc_keyence(self.host,self.port)
-        print("connected") 
-
-    def read_plc_keyence(self,data):
-        a = 'RD '
-        c = '\x0D'
-        d = a+ data +c
-        datasend = d.encode("UTF-8")
-        soc.sendall(datasend)
-        data = soc.recv(1024)
-        datadeco = data.decode("UTF-8")
-        data1 = int(datadeco)
-        return data1
-
-    def write_plc_keyence(self,register,data):
-        a = 'WR '
-        b = ' '
-        c = '\x0D'
-        d = a+register+b+str(data)+c
-        datasend  = d.encode("UTF-8")
-        soc.sendall(datasend)
-        datares = soc.recv(1024)
-
-    def connect_plc_omron(self):
-        global fins_instance
-        try:
-            fins_instance = UDPFinsConnection()
-            fins_instance.connect(self.host)
-            fins_instance.dest_node_add=1
-            fins_instance.srce_node_add=25
-            return True
-        except:
-            print("Can't connect to PLC")
-            for i in range(100000000):
-                pass
-            print("Reconnecting....")
-            return False
-
-    def run_plc_omron(self):
-        connected = False
-        while connected == False:
-            connected = self.connect_plc_omron(self.host)
-            print('connecting ....')
-        print("connected plc") 
-
-    def read_plc_omron(self,register):
-        register = (register).to_bytes(2, byteorder='big') + b'\x00'
-        read_var = fins_instance.memory_area_read(FinsPLCMemoryAreas().DATA_MEMORY_WORD,register)
-        read_var = int.from_bytes(read_var[-2:], byteorder='big')  
-        return read_var
-
-    def write_plc_omron(self,register,data):
-        register = (register).to_bytes(2, byteorder='big') + b'\x00'
-        fins_instance.memory_area_write(FinsPLCMemoryAreas().DATA_MEMORY_WORD,register,b'\x00\x00',data)
-
-
-class MySQL_Connection():
-
-    def __init__(self,host,user,passwd,database):
-        self.host = host
-        self.user = user
-        self.passwd = passwd
-        self.database = database
-
-    def Connect_MySQLServer(self):
-            db_connection = mysql.connector.connect(
-            host= self.host,
-            user=self.user, 
-            passwd=self.passwd,
-            database=self.database)                    
-            cursor = db_connection.cursor()
-            return cursor,db_connection
-
-    def check_connection(self):
-        _,db_connection = self.Connect_MySQLServer()
-        try:
-            db_connection.ping(reconnect=True, attempts=3, delay=5)
-            return True
-        except mysql.connector.Error as err:
-            messagebox.showinfo("Notification", f"Error connecting to the database: {str(err)}")
-            return False
-
-    def reconnect(self):
-        _,db_connection = self.Connect_MySQLServer()
-        try:
-            db_connection.reconnect(attempts=3, delay=5)
-            cursor = db_connection.cursor()  
-            return True
-        except mysql.connector.Error as err:
-            messagebox.showinfo("Notification", f"Failed to reconnect to the database: {str(err)}")
-            return False
 def removefile():
     directory1 = 'C:/Users/CCSX009/Documents/yolov5/test_image/camera1/*.jpg'
     directory2 = 'C:/Users/CCSX009/Documents/yolov5/test_image/camera2/*.jpg'

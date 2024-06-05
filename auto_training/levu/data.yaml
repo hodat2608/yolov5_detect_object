@@ -1,0 +1,4 @@
+train: C:\auto_training/train/images
+val: C:\auto_training/valid/images
+nc: 3
+names: ['ok1', 'ok2', 'ok3']
