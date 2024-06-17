@@ -100,7 +100,7 @@ import time
 
 def detect_ChatGPT(image_path):
     t1 = time.time()
-    print(model1)
+    # print(model1)
     results = model1(image_path, 608, 0.15)
     area_remove = []
     table1 = results.pandas().xyxy[0]  
@@ -119,7 +119,6 @@ def detect_ChatGPT(image_path):
                     area_remove.append(item)
 
     name = list(table1['name'])
-    print(name)   
     show1 = np.squeeze(results.render(area_remove))
     show1 = cv2.resize(show1, (1000,800), interpolation=cv2.INTER_AREA)
     show1 = cv2.cvtColor(show1, cv2.COLOR_BGR2RGB)
@@ -138,6 +137,7 @@ def change_model():
     return model_file
 
 def open_image_folder():
+    global images
     folder = sg.popup_get_folder('Select Image Folder')
     if folder:
         images = sorted(glob.glob(os.path.join(folder, "*.jpg")))
@@ -147,6 +147,8 @@ def open_image_folder():
 def detect_images_in_folder(images, current_index):
     if images:
         current_index %= len(images)
+        print(current_index)
+        print(images[current_index])
         detect_ChatGPT(images[current_index])
         return current_index
     return None
