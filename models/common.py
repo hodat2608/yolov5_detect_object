@@ -895,6 +895,7 @@ class Detections:
     def _run(self, pprint=False, show=False, save=False, crop=False, render=False, labels=True, save_dir=Path(""),area_remove=None):
         """Executes model predictions, displaying and/or saving outputs with optional crops and labels."""
         s, crops = "", []
+        print('self.pred',self.pred)
         for i, (im, pred) in enumerate(zip(self.ims, self.pred)):
             s += f"\nimage {i + 1}/{len(self.pred)}: {im.shape[0]}x{im.shape[1]} "  # string
             if pred.shape[0]:
@@ -908,6 +909,7 @@ class Detections:
                        pass
                     else:
                         pred = pred.tolist()
+                        print('pred',pred)
                         need_remove = []
                         for ipred in range(len(pred)):
                             if ipred in area_remove:
@@ -991,6 +993,7 @@ class Detections:
     def render(self, area_remove=True):
         """Renders detection results with optional labels on images; args: labels (bool) indicating label inclusion."""
         self._run(render=True, area_remove=area_remove)  # render results
+        print(self.ims)
         return self.ims
 
     def pandas(self):

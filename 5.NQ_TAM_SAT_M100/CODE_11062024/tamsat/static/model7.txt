@@ -1,0 +1,1 @@
+model7=C:/FIle_train/Cam7/A86_C7_RF370CB_2023-08-22.pt
